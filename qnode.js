@@ -1,4 +1,4 @@
-function spawnNode(content, config) {
+function spawnElement(content, config) {
   let element = document.createElement(config["element"])
   config["class"].forEach(function(class_name) {
     element.classList.add(class_name)
@@ -12,6 +12,7 @@ class QNet {
     this.name = name
     this.fields = {}
     this.cache = {}
+    this.ctrl = {}
     this.active = null
     this.mode = "default"
   }
@@ -34,6 +35,11 @@ class QNet {
         }
         this.active = null
         this.mode = "default"
+        for(let key in this.ctrl) {
+          let element = document.getElementById(key)
+          element.removeEventListener("click", this)
+        }
+        this.ctrl = {}
       }
     } else if(mode == "sync") {
         // hide all nodes
@@ -79,7 +85,7 @@ class QNet {
         // spawn each node using field config
         let config = this.fields[fn]["config"]
         let cid = this.fields[fn]["id"]
-        let element = spawnNode(content, config)
+        let element = spawnElement(content, config)
         element.id = name + "#" + fn
         // add each node to field container
         let container = document.getElementById(cid)
@@ -163,6 +169,31 @@ class QNet {
         element.style.display = null
       })
       this.active = name
+    }
+  }
+  handleEvent(evt) {
+    let node_id = this.ctrl[evt.target.id]
+    this.setActiveNode(node_id)
+  }
+  addController(name, element_id) {
+    if(!(name in this.cache)) {
+      console.log("Error: node '"+name+"' does not exist")
+    } else if(this.mode != "sync") {
+      console.log("Error: cannot add node controller using mode '"+this.mode+"'")
+    } else if(element_id in this.ctrl) {
+      console.log("Error: element with ID '"+element_id+"' is already a controller")
+    } else {
+      let element = document.getElementById(element_id)
+      element.addEventListener("click", this, false)
+      this.ctrl[element_id] = name
+    }
+  }
+  dropController(element_id) {
+    if(!(element_id in this.ctrl)) {
+      console.log("Error: element with ID '"+element_id+"' is not a controller")
+    } else {
+      document.getElementById(element_id).removeEventListener("click", this)
+      delete this.ctrl[element_id]
     }
   }
 }
