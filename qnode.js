@@ -16,11 +16,9 @@ class QNet {
     this.active = null
     this.mode = "default"
   }
-  addField(name, container_id, config) {
-    if(!(name in this.fields)) {
-      this.fields[name] = {}
-      this.fields[name]["config"] = config
-      this.fields[name]["id"] = container_id
+  addField(container_id, config) {
+    if(!(container_id in this.fields)) {
+      this.fields[container_id] = config
     }
   }
   setMode(mode) {
@@ -83,12 +81,11 @@ class QNet {
       }
       for(let fn in this.fields) {
         // spawn each node using field config
-        let config = this.fields[fn]["config"]
-        let cid = this.fields[fn]["id"]
+        let config = this.fields[fn]
         let element = spawnElement(content, config)
         element.id = name + "#" + fn
         // add each node to field container
-        let container = document.getElementById(cid)
+        let container = document.getElementById(fn)
         if(active == true) {
           element.style.display = "none"
         }
@@ -101,6 +98,46 @@ class QNet {
       }
       // add cache_row to cache
       this.cache[name] = cache_row
+    }
+  }
+  entangleIds(name, id_array) {
+    console.log("name: "+name)
+    let field_keys = Object.keys(this.fields)
+    if(id_array.length != field_keys.length) {
+      console.log("Error: failed to entangle elements (ids < fields)")
+    } else if(name in this.cache) {
+      console.log("Error: node with name '"+name+"' already exists in QNet '"+this.name+"'")
+    } else {
+      let field_check = {}
+      let stop_flag = false
+      id_array.forEach(function(element_id) {
+        if(stop_flag == true) {
+          return null
+        }
+        let element = document.getElementById(element_id)
+        let parent_id = element.parentElement.id
+        if(field_keys.includes(parent_id) && (!(parent_id in field_check))) {
+          field_check[parent_id] = element.id
+        } else {
+          console.log("Error: duplicate parent elements or non-field parent")
+          stop_flag = true
+          return null
+        }
+      })
+      this.cache[name] = []
+      for(let fn in field_check) {
+        this.cache[name].push(field_check[fn])
+      }
+      if(this.mode == "sync") {
+        if(Object.keys(this.cache).length > 1) {
+          this.cache[name].forEach(function(element_id) {
+            let element = document.getElementById(element_id)
+            element.style.display = "none"
+          })
+        } else {
+          this.active = name
+        }
+      }
     }
   }
   dropNode(name) {
@@ -158,6 +195,7 @@ class QNet {
     } else if(this.mode != "sync") {
       console.log("Error: cannot set active node using mode '"+this.mode+"'")
     } else {
+      console.log(this.active)
       // set current active node to invisible
       this.cache[this.active].forEach(function(node_id) {
         let element = document.getElementById(node_id)
@@ -172,7 +210,10 @@ class QNet {
     }
   }
   handleEvent(evt) {
-    let node_id = this.ctrl[evt.target.id]
+    let tid = evt.target.id
+    let element = document.getElementById(tid)
+    this.onControlClick.bind(element)()
+    let node_id = this.ctrl[tid]
     this.setActiveNode(node_id)
   }
   addController(name, element_id) {
@@ -189,11 +230,14 @@ class QNet {
     }
   }
   dropController(element_id) {
-    if(!(element_id in this.ctrl)) {
+    if(this.mode != "sync") {
+      console.log("Error: failed to drop controller using mode '"+this.mode+"'")
+    } else if(!(element_id in this.ctrl)) {
       console.log("Error: element with ID '"+element_id+"' is not a controller")
     } else {
       document.getElementById(element_id).removeEventListener("click", this)
       delete this.ctrl[element_id]
     }
   }
+  onControlClick() {}
 }
