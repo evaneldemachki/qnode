@@ -1,6 +1,6 @@
 function spawnElement(content, config) {
   let element = document.createElement(config["element"])
-  config["class"].forEach(function(class_name) {
+  config["classes"].forEach(function(class_name) {
     element.classList.add(class_name)
   })
   element.innerHTML = content
@@ -8,236 +8,318 @@ function spawnElement(content, config) {
 }
 
 class QNet {
-  constructor(name) {
-    this.name = name
+
+  constructor(mode) {
+    const modes = ["sync", "switch", "select"]
+    if(!(modes.includes(mode))) {
+      console.log("Error: Invalid mode parameter '" + mode + "'")
+    }
     this.fields = {}
     this.cache = {}
     this.ctrl = {}
     this.active = null
-    this.mode = "default"
+    this.mode = mode
   }
-  addField(container_id, config) {
-    if(!(container_id in this.fields)) {
-      this.fields[container_id] = config
+  // use element as field with config dict
+  addField(element_id, config=null) {
+    const default_conf = {
+      "element": "div",
+      "classes": []
     }
-  }
-  setMode(mode) {
-    if(mode == "default") {
-      if(this.mode != "default") {
-        // set all nodes to default visibility
-        for(let key in this.cache) {
-          this.cache[key].forEach(function(node_id) {
-            let element = document.getElementById(node_id)
-            element.style.display = null
-          })
+    if(config == null) {
+      config = default_conf
+    } else {
+      // fill missing config keys with defaults
+      for(let prop in default_conf) {
+        if(!(prop in config)) {
+          config[prop] = default_conf[prop]
         }
-        this.active = null
-        this.mode = "default"
-        for(let key in this.ctrl) {
-          let element = document.getElementById(key)
-          element.removeEventListener("click", this)
-        }
-        this.ctrl = {}
       }
-    } else if(mode == "sync") {
-        // hide all nodes
-        for(let key in this.cache) {
-          this.cache[key].forEach(function(node_id) {
-            let element = document.getElementById(node_id)
-            element.style.display = "none"
-          })
-        }
-        // set first node to default visibility
-        let name = null
-        for(let key in this.cache) {
-          this.cache[key].forEach(function(node_id) {
-            let element = document.getElementById(node_id)
-            element.style.display = null
-          })
-          name = key
-          break
-        }
-        this.active = name
-        this.mode = "sync"
-    } else {
-      console.log("Error: invalid mode '"+mode+"'")
+    }
+    if(!(element_id in this.fields)) {
+      this.fields[element_id] = config
     }
   }
-  addNode(name, content) {
-    // check for no fields || duplicate node name
+  // add node with optional inner content
+  addNode(node_id, content=null) {
+    // check for no fields || duplicate nodeID
     if(this.fields.length == 0) {
-      console.log("Error: no fields exist in QNet '"+this.name+"'")
-    } else if(name in this.cache) {
-      console.log("Error: node with name '"+name+"' already exists in QNet '"+this.name+"'")
+      console.log("Error: no fields exist in QNet")
+    } else if(node_id in this.cache) {
+      console.log("Error: node '" + node_id + "' already exists")
     } else {
-      let cache_row = []
-      let active = null
-      if(this.mode == "sync") {
+      let cache_doc = {}
+      let active_set = null
+      if(this.mode in ["switch", "select"]) {
         if(this.active == null) {
-          active = false
+          active_set = false
         } else {
-          active = true
+          active_set = true
         }
       }
       for(let fn in this.fields) {
         // spawn each node using field config
         let config = this.fields[fn]
         let element = spawnElement(content, config)
-        element.id = name + "#" + fn
-        // add each node to field container
+        element.id = node_id + "#" + fn
         let container = document.getElementById(fn)
-        if(active == true) {
-          element.style.display = "none"
-        }
         container.appendChild(element)
-        // add node_id to cache_row
-        cache_row.push(element.id)
+        // add node_id to cache_document
+        cache_doc[fn] = element.id
+        this.onNodeAdd.bind(element)()
+        // if active node is set in switch mode:
+        if(active_set == true && this.mode == "switch") {
+          element.style.display = "none" // hide visibility
+        }
+        // if active node is not set in select mode:
+        if(active_set == false && this.mode == "select") {
+          this.onNodeSelect.bind(element)() // perform custom select function
+        }
       }
-      if(active == false) {
-        this.active = name
+      // if active node is not set:
+      if(active_set == false) {
+        this.active = node_id // set node to active
       }
-      // add cache_row to cache
-      this.cache[name] = cache_row
+      // add cache document to cache
+      this.cache[node_id] = cache_doc
     }
   }
-  entangleIds(name, id_array) {
-    console.log("name: "+name)
+  // convert existing elements to node
+  entangleIds(elem_ids, node_id) {
     let field_keys = Object.keys(this.fields)
-    if(id_array.length != field_keys.length) {
+    if(elem_ids.length != field_keys.length) {
       console.log("Error: failed to entangle elements (ids < fields)")
-    } else if(name in this.cache) {
-      console.log("Error: node with name '"+name+"' already exists in QNet '"+this.name+"'")
+    } else if(node_id in this.cache) {
+      console.log("Error: node with '" + node_id + "' already exists")
     } else {
       let field_check = {}
-      let stop_flag = false
-      id_array.forEach(function(element_id) {
-        if(stop_flag == true) {
-          return null
-        }
-        let element = document.getElementById(element_id)
-        let parent_id = element.parentElement.id
-        if(field_keys.includes(parent_id) && (!(parent_id in field_check))) {
-          field_check[parent_id] = element.id
-        } else {
-          console.log("Error: duplicate parent elements or non-field parent")
-          stop_flag = true
-          return null
-        }
-      })
-      this.cache[name] = []
-      for(let fn in field_check) {
-        this.cache[name].push(field_check[fn])
+      try {
+        elem_ids.forEach(function(elem_id) {
+          let element = document.getElementById(elem_id)
+          let parent_id = element.parentElement.id
+          if(field_keys.includes(parent_id) && (!(parent_id in field_check))) {
+            field_check[parent_id] = element.id
+          } else {
+            throw "Error: duplicate parent elements or non-field parent"
+            return null
+          }
+        })
+      } catch(e) {
+        console.log(e)
+        return null
       }
-      if(this.mode == "sync") {
+      this.cache[node_id] = {}
+      for(let fn in field_check) {
+        this.cache[node_id][fn] = field_check[fn]
+      }
+      if(this.mode == "switch") {
+        // if new node IS NOT the only existing node:
         if(Object.keys(this.cache).length > 1) {
-          this.cache[name].forEach(function(element_id) {
-            let element = document.getElementById(element_id)
+          // hide node visibility
+          for(let fid in this.cache[node_id]) {
+            let element = document.getElementById(this.cache[node_id][fid])
             element.style.display = "none"
-          })
+          }
         } else {
-          this.active = name
+          this.active = node_id
+        }
+      } else if(this.mode == "select") {
+        // if new node IS the only existing node:
+        if(Object.keys(this.cache).length == 1) {
+          for(let fid in this.cache) {
+            let element = document.getElementById(this.cache[node_id][fid])
+            this.onNodeSelect.bind(element)()
+          }
         }
       }
     }
   }
-  dropNode(name) {
-    // check for non-existent node
-    if(!(name in this.cache)) {
-      console.log("Error: node '"+name+"' does not exist")
+  // drop node
+  dropNode(node_id) {
+    if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
     } else {
       // remove each node instance from document
-      this.cache[name].forEach(function(node_id) {
-        document.getElementById(node_id).remove()
-      })
+      for(let fid in this.cache[node_id]) {
+        document.getElementById(this.cache[node_id][fid]).remove()
+      }
       // remove node from cache
-      delete this.cache[name]
-      // check for active node in sync mode
-      if(this.mode == "sync") {
-        if(this.active == name) {
-          let next_id = null
-          for(let key in this.cache) {
-            next_id = key
-            break
+      delete this.cache[node_id]
+      // check for active node in switch mode
+      if(this.mode == "switch" && this.active == node_id) {
+        let next_id = null
+        for(let key in this.cache) {
+          next_id = key
+          break
+        }
+        if(next_id != null) {
+          for(let fid in this.cache[next_id]) {
+            let element = document.getElementById(this.cache[next_id][fid])
+            element.style.display = null
           }
-          if(next_id != null) {
-            this.cache[next_id].forEach(function(node_id) {
-              let element = document.getElementById(node_id)
-              element.style.display = null
-            })
-            this.active = next_id
-          } else {
-            this.active = null
+          this.active = next_id
+        } else {
+          this.active = null
+        }
+      } else if(this.mode == "select" && this.active == "node_id") {
+        let next_id = null
+        for(let key in this.cache) {
+          next_id = key
+          break
+        }
+        if(next_id != null) {
+          for(let fid in this.cache[next_id]) {
+            let element = document.getElementById(this.cache[next_id][fid])
+            this.onNodeSelect.bind(element)()
           }
         }
       }
+      this.onNodeDrop.bind(null)()
     }
   }
-  toggleNodeView(name) {
-    // check for non-existent node
-    if(!(name in this.cache)) {
-      console.log("Error: node '"+name+"' does not exist")
-    } else if(this.mode != "default") {
+  // toggle visibility for node
+  toggleNodeVisible(node_id) {
+    if(this.mode != "sync") {
       console.log("Error: cannot toggle view using mode '"+this.mode+"'")
+    } else if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
     } else {
-      this.cache[name].forEach(function(node_id) {
-        let element = document.getElementById(node_id)
+      for(let fid in this.cache[node_id]) {
+        let element = document.getElementById(this.cache[node_id][fid])
         if(element.style.display == "none") {
           element.style.display = null
         } else {
           element.style.display = "none"
         }
-      })
+      }
     }
   }
-  setActiveNode(name) {
-    if(!(name in this.cache)) {
-      console.log("Error: node '"+name+"' does not exist")
-    } else if(this.mode != "sync") {
-      console.log("Error: cannot set active node using mode '"+this.mode+"'")
+  // return node element at field
+  nodeAt(node_id, field_id) {
+    if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
     } else {
-      console.log(this.active)
-      // set current active node to invisible
-      this.cache[this.active].forEach(function(node_id) {
-        let element = document.getElementById(node_id)
-        element.style.display = "none"
-      })
-      // set new active node to default visibility
-      this.cache[name].forEach(function(node_id) {
-        let element = document.getElementById(node_id)
-        element.style.display = null
-      })
-      this.active = name
+      let elid = this.cache[node_id][field_id]
+      return document.getElementById(elid)
     }
   }
+  // switch to node
+  switchTo(node_id) {
+    if(this.mode != "switch") {
+      console.log("Error: cannot switch to active node using mode '"+this.mode+"'")
+    } else if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
+    } else {
+      // set current active node to invisible
+      for(let fid in this.cache[this.active]) {
+        let element = document.getElementById(this.cache[this.active][fid])
+        element.style.display = "none"
+      }
+      // set new active node to default visibility
+      for(let fid in this.cache[node_id]) {
+        let element = document.getElementById(this.cache[node_id][fid])
+        element.style.display = null
+      }
+      // register new active element
+      this.active = node_id
+    }
+  }
+  selectNode(node_id) {
+    if(this.mode != "select") {
+      console.log("Error: cannot select active node using mode '"+this.mode+"'")
+    } else if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
+    } else {
+      // perform custom unselect function on currently active node
+      if(this.active != null) {
+        for(let fid in this.cache[this.active]) {
+          let element = document.getElementById(this.cache[this.active][fid])
+          this.onNodeUnselect.bind(element)()
+        }
+      }
+      // perform custom select function on newly active node
+      for(let fid in this.cache[this.active]) {
+        let element = document.getElementById(this.cache[this.active][fid])
+        this.onNodeSelect.bind(element)()
+      }
+      this.active = node_id
+    }
+  }
+  // handles bound actions
   handleEvent(evt) {
     let tid = evt.target.id
     let element = document.getElementById(tid)
-    this.onControlClick.bind(element)()
     let node_id = this.ctrl[tid]
-    this.setActiveNode(node_id)
+
+    if(this.mode == "switch") {
+      this.switchTo(node_id)
+      this.onSwitchClick.bind(element)()
+    } else if(this.mode == "select") {
+      this.selectNode(node_id)
+      this.onSelectClick.bind(element)()
+    }
   }
-  addController(name, element_id) {
-    if(!(name in this.cache)) {
-      console.log("Error: node '"+name+"' does not exist")
-    } else if(this.mode != "sync") {
-      console.log("Error: cannot add node controller using mode '"+this.mode+"'")
+  // bind switchTo(node_id) to element_id
+  bindSwitch(element_id, node_id) {
+    if(this.mode != "switch") { // check
+      console.log("Error: cannot use bound switch methods using mode '"+this.mode+"'")
+    } else if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
     } else if(element_id in this.ctrl) {
-      console.log("Error: element with ID '"+element_id+"' is already a controller")
+      console.log("Error: element with ID '" + element_id + "' already bound")
     } else {
       let element = document.getElementById(element_id)
       element.addEventListener("click", this, false)
-      this.ctrl[element_id] = name
+
+      this.ctrl[element_id] = node_id
     }
   }
-  dropController(element_id) {
-    if(this.mode != "sync") {
-      console.log("Error: failed to drop controller using mode '"+this.mode+"'")
+  // unbind switchTo from element_id
+  unbindSwitch(element_id) {
+    if(this.mode != "switch") { // check
+      console.log("Error: cannot use bound switch methods using mode '"+this.mode+"'")
     } else if(!(element_id in this.ctrl)) {
-      console.log("Error: element with ID '"+element_id+"' is not a controller")
+      console.log("Error: element with ID '"+element_id+"' is not bound")
     } else {
       document.getElementById(element_id).removeEventListener("click", this)
       delete this.ctrl[element_id]
     }
   }
-  onControlClick() {}
+  // bind selectNode to element_id
+  bindSelect(element_id, node_id) {
+    if(this.mode != "select") {
+      console.log("Error: cannot use bound select methods using mode '"+this.mode+"'")
+    } else if(element_id in this.ctrl) {
+      console.log("Error: element with ID '"+element_id+"' already bound")
+    } else {
+      let element = document.getElementById(element_id)
+      element.addEventListener("click", this, false)
+
+      this.ctrl[element_id] = node_id
+    }
+  }
+  // unbind switchTo from element_id
+  unbindSelect(element_id, node_id) {
+    if(this.mode != "select") { // check
+      console.log("Error: cannot use bound select methods using mode '"+this.mode+"'")
+    } else if(!(element_id in this.ctrl)) {
+      console.log("Error: element with ID '"+element_id+"' is not bound")
+    } else {
+      document.getElementById(element_id).removeEventListener("click", this)
+      delete this.ctrl[element_id]
+    }
+  }
+  // custom bound switch listener
+  onSwitchClick() {} // this = clicked element
+  // custom bound select listener
+  onSelectClick() {}
+  // custom node added listener
+  onNodeAdd() {} // this = added node elements
+  // custom node dropped listener
+  onNodeDrop() {} // this = null
+  // custom node selected listener
+  onNodeSelect() {} // this = selected node elements
+  // custom node unselected listener
+  onNodeUnselect() {} // this = unselected node elements
+
 }
