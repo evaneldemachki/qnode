@@ -298,8 +298,6 @@ class QNet {
   bindSelect(element_id, node_id) {
     if(this.mode != "select") {
       console.log("Error: cannot use bound select methods using mode '"+this.mode+"'")
-    } else if(element_id in this.ctrl) {
-      console.log("Error: element with ID '"+element_id+"' already bound")
     } else {
       let element = document.getElementById(element_id)
       element.addEventListener("click", this, false)
