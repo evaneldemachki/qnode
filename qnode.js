@@ -17,6 +17,7 @@ class QNet {
     this.fields = {}
     this.cache = {}
     this.ctrl = {}
+    this.ents = {}
     this.active = null
     this.mode = mode
   }
@@ -82,10 +83,12 @@ class QNet {
       }
       // add cache document to cache
       this.cache[node_id] = cache_doc
+      // add ents entry for node
+      this.ents[node_id] = []
     }
   }
   // convert existing elements to node
-  entangleIds(elem_ids, node_id) {
+  nodeFromIds(elem_ids, node_id) {
     let field_keys = Object.keys(this.fields)
     if(elem_ids.length != field_keys.length) {
       console.log("Error: failed to entangle elements (ids < fields)")
@@ -143,8 +146,14 @@ class QNet {
       for(let fid in this.cache[node_id]) {
         document.getElementById(this.cache[node_id][fid]).remove()
       }
-      // remove node from cache
+      // remove entangled elements
+      for(let i = 0; i < this.ents[node_id].length; i += 1) {
+        document.getElementById(this.ents[node_id][i]).remove()
+      }
+      // remove node from cache + ents
       delete this.cache[node_id]
+      delete this.ents[node_id]
+
       // check for active node in switch mode
       if(this.mode == "switch" && this.active == node_id) {
         let next_id = null
@@ -174,7 +183,7 @@ class QNet {
           }
         }
       }
-      this.onNodeDrop.bind(null)()
+      this.onNodeDrop.bind(node_id)()
     }
   }
   // toggle visibility for node
@@ -309,6 +318,24 @@ class QNet {
       delete this.ctrl[element_id]
     }
   }
+  // entangle element to node: will remove element on dropNode
+  nodeEntangle(node_id, element_id) {
+    if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
+    } else {
+      this.ents[node_id].push(element_id)
+    }
+  }
+  nodeUnentangle(node_id, element_id) {
+    if(!(node_id in this.cache)) {
+      console.log("Error: node '" + node_id + "' does not exist")
+    } else if(!(element_id in this.ents[node_id])){
+      console.log("Error: element not entangled to node '" + node_id + "'")
+    } else {
+      let index = this.ents[node_id].indexOf(element_id)
+      this.ents[node_id].splice(index, 1)
+    }
+  }
   // custom bound switch listener
   onSwitchClick() {} // this = clicked element
   // custom bound select listener
@@ -316,7 +343,7 @@ class QNet {
   // custom node added listener
   onNodeAdd() {} // this = added node elements
   // custom node dropped listener
-  onNodeDrop() {} // this = null
+  onNodeDrop() {} // this = node ID
   // custom node selected listener
   onNodeSelect() {} // this = selected node elements
   // custom node unselected listener
