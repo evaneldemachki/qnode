@@ -7,6 +7,20 @@ function spawnElement(content, config) {
   return element
 }
 
+class NodeElement {
+  constructor(net, id, element) {
+    this.id = id
+    this.element = element
+    this.net = net
+    this.select = () => {
+      this.net.selectNode(this.id)
+    }
+    this.toggleVisible = () => {
+      this.net.toggleNodeVisible(this.id)
+    }
+  }
+}
+
 class QNet {
 
   constructor(mode) {
@@ -20,7 +34,19 @@ class QNet {
     this.ents = {}
     this.active = null
     this.mode = mode
+
+    this.onNodeAdd = {
+      "*": function() {},
+      "^": function() {}
+    }
+    this.onNodeDrop = {
+      "*": function() {},
+      "^": function() {}
+    }
+
+    this.reserved = ["*", "^"]
   }
+
   // use element as field with config dict
   addField(element_id, config=null) {
     const default_conf = {
@@ -39,6 +65,8 @@ class QNet {
     }
     if(!(element_id in this.fields)) {
       this.fields[element_id] = config
+      this.onNodeAdd[element_id] = function() {}
+      this.onNodeDrop[element_id] = function() {}
     }
   }
   // add node with optional inner content
@@ -48,6 +76,8 @@ class QNet {
       console.log("Error: no fields exist in QNet")
     } else if(node_id in this.cache) {
       console.log("Error: node '" + node_id + "' already exists")
+    } else if(this.reserved.includes(node_id)) {
+      console.log("Error: '" + node_id + "' is a reserved word")
     } else {
       let cache_doc = {}
       let active_set = null
@@ -58,6 +88,9 @@ class QNet {
           active_set = true
         }
       }
+      // call pre-add handler
+      let pre_node_element = new NodeElement(this, node_id, null)
+      this.onNodeAdd["^"].bind(pre_node_element)()
       for(let fn in this.fields) {
         // spawn each node using field config
         let config = this.fields[fn]
@@ -65,9 +98,8 @@ class QNet {
         element.id = node_id + "#" + fn
         let container = document.getElementById(fn)
         container.appendChild(element)
-        // add node_id to cache_document
+        // add node_id to cache document
         cache_doc[fn] = element.id
-        this.onNodeAdd.bind(element)()
         // if active node is set in switch mode:
         if(active_set == true && this.mode == "switch") {
           element.style.display = "none" // hide visibility
@@ -76,6 +108,10 @@ class QNet {
         if(active_set == false && this.mode == "select") {
           this.onNodeSelect.bind(element)() // perform custom select function
         }
+        // call add-node handler
+        let node_element = new NodeElement(this, node_id, element)
+        this.onNodeAdd["*"].bind(node_element)()
+        this.onNodeAdd[fn].bind(node_element)()
       }
       // if active node is not set:
       if(active_set == false) {
@@ -94,11 +130,13 @@ class QNet {
       console.log("Error: failed to entangle elements (ids < fields)")
     } else if(node_id in this.cache) {
       console.log("Error: node with '" + node_id + "' already exists")
+    } else if(this.reserved.includes(node_id)) {
+      console.log("Error: '" + node_id + "' is a reserved word")
     } else {
       let field_check = {}
       try {
-        elem_ids.forEach(function(elem_id) {
-          let element = document.getElementById(elem_id)
+        for(let i = 0; i < elem_ids.length; i += 1) {
+          let element = document.getElementById(elem_ids[i])
           let parent_id = element.parentElement.id
           if(field_keys.includes(parent_id) && (!(parent_id in field_check))) {
             field_check[parent_id] = element.id
@@ -106,14 +144,22 @@ class QNet {
             throw "Error: duplicate parent elements or non-field parent"
             return null
           }
-        })
+        }
       } catch(e) {
         console.log(e)
         return null
       }
+      // call pre-add handler
+      let pre_node_element = new NodeElement(this, node_id, null)
+      this.onNodeAdd["^"].bind(pre_node_element)()
+      // for each field:
       this.cache[node_id] = {}
       for(let fn in field_check) {
         this.cache[node_id][fn] = field_check[fn]
+        // call add-node handler
+        let element = document.getElementById(field_check[fn])
+        let node_element = new NodeElement(this, node_id, element)
+        this.onNodeAdd[fn].bind(node_element)()
       }
       if(this.mode == "switch") {
         // if new node IS NOT the only existing node:
@@ -142,9 +188,18 @@ class QNet {
     if(!(node_id in this.cache)) {
       console.log("Error: node '" + node_id + "' does not exist")
     } else {
-      // remove each node instance from document
+      // call pre-drop handler
+      let pre_node_element = new NodeElement(this, node_id, null)
+      this.onNodeDrop["^"].bind(pre_node_element)()
+      // for each field:
       for(let fid in this.cache[node_id]) {
-        document.getElementById(this.cache[node_id][fid]).remove()
+        // call drop-node handler
+        let element = document.getElementById(this.cache[node_id][fid])
+        let node_element = new NodeElement(this, node_id, element)
+        this.onNodeDrop["*"].bind(node_element)()
+        this.onNodeDrop[fid].bind(node_element)()
+        // remove node instance from document
+        element.remove()
       }
       // remove entangled elements
       for(let i = 0; i < this.ents[node_id].length; i += 1) {
@@ -183,7 +238,6 @@ class QNet {
           }
         }
       }
-      this.onNodeDrop.bind(node_id)()
     }
   }
   // toggle visibility for node
@@ -338,10 +392,6 @@ class QNet {
   onSwitchClick() {} // this = clicked element
   // custom bound select listener
   onSelectClick() {}
-  // custom node added listener
-  onNodeAdd() {} // this = added node elements
-  // custom node dropped listener
-  onNodeDrop() {} // this = node ID
   // custom node selected listener
   onNodeSelect() {} // this = selected node elements
   // custom node unselected listener
