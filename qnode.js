@@ -1,9 +1,9 @@
-function spawnElement(content, config) {
+function spawnElement(config) {
   let element = document.createElement(config["element"])
   config["classes"].forEach(function(class_name) {
     element.classList.add(class_name)
   })
-  element.innerHTML = content
+
   return element
 }
 
@@ -12,6 +12,11 @@ class NodeElement {
     this.id = id
     this.element = element
     this.net = net
+    if(id in net.cache) {
+      this.data = net.cache[id]["data"]
+    } else {
+      this.data = null
+    }
     this.select = () => {
       this.net.selectNode(this.id)
     }
@@ -22,7 +27,6 @@ class NodeElement {
 }
 
 class QNet {
-
   constructor(mode) {
     const modes = ["sync", "switch", "select"]
     if(!(modes.includes(mode))) {
@@ -43,10 +47,10 @@ class QNet {
       "*": function() {},
       "^": function() {}
     }
-
-    this.reserved = ["*", "^"]
+    this.reserved = {
+      "node": ["*", "^"]
+    }
   }
-
   // use element as field with config dict
   addField(element_id, config=null) {
     const default_conf = {
@@ -69,17 +73,20 @@ class QNet {
       this.onNodeDrop[element_id] = function() {}
     }
   }
-  // add node with optional inner content
-  addNode(node_id, content=null) {
+  // add node with optional data attribute
+  addNode(node_id, data=null) {
     // check for no fields || duplicate nodeID
     if(this.fields.length == 0) {
       console.log("Error: no fields exist in QNet")
     } else if(node_id in this.cache) {
       console.log("Error: node '" + node_id + "' already exists")
-    } else if(this.reserved.includes(node_id)) {
+    } else if(this.reserved["node"].includes(node_id)) {
       console.log("Error: '" + node_id + "' is a reserved word")
     } else {
       let cache_doc = {}
+      cache_doc["data"] = data
+      let fields = cache_doc["fields"] = {}
+
       let active_set = null
       if(this.mode in ["switch", "select"]) {
         if(this.active == null) {
@@ -91,15 +98,18 @@ class QNet {
       // call pre-add handler
       let pre_node_element = new NodeElement(this, node_id, null)
       this.onNodeAdd["^"].bind(pre_node_element)()
-      for(let fn in this.fields) {
+      let node_elements = []
+      for(let fid in this.fields) {
         // spawn each node using field config
-        let config = this.fields[fn]
-        let element = spawnElement(content, config)
-        element.id = node_id + "#" + fn
-        let container = document.getElementById(fn)
+        let config = this.fields[fid]
+        let element = spawnElement(config)
+        element.id = node_id + "#" + fid
+        let container = document.getElementById(fid)
         container.appendChild(element)
         // add node_id to cache document
-        cache_doc[fn] = element.id
+        fields[fid] = element.id
+        console.log(fields)
+        console.log(cache_doc)
         // if active node is set in switch mode:
         if(active_set == true && this.mode == "switch") {
           element.style.display = "none" // hide visibility
@@ -109,9 +119,7 @@ class QNet {
           this.onNodeSelect.bind(element)() // perform custom select function
         }
         // call add-node handler
-        let node_element = new NodeElement(this, node_id, element)
-        this.onNodeAdd["*"].bind(node_element)()
-        this.onNodeAdd[fn].bind(node_element)()
+        node_elements.push([element, fid])
       }
       // if active node is not set:
       if(active_set == false) {
@@ -119,8 +127,17 @@ class QNet {
       }
       // add cache document to cache
       this.cache[node_id] = cache_doc
+      console.log(this.cache)
       // add ents entry for node
       this.ents[node_id] = []
+      // call node add handlers
+      for(let i = 0; i < node_elements.length; i += 1) {
+        let element = node_elements[i][0]
+        let fid = node_elements[i][1]
+        let nel = new NodeElement(this, node_id, element)
+        this.onNodeAdd["*"].bind(nel)()
+        this.onNodeAdd[fid].bind(nel)()
+      }
     }
   }
   // convert existing elements to node
@@ -130,7 +147,7 @@ class QNet {
       console.log("Error: failed to entangle elements (ids < fields)")
     } else if(node_id in this.cache) {
       console.log("Error: node with '" + node_id + "' already exists")
-    } else if(this.reserved.includes(node_id)) {
+    } else if(this.reserved["node"].includes(node_id)) {
       console.log("Error: '" + node_id + "' is a reserved word")
     } else {
       let field_check = {}
@@ -154,19 +171,20 @@ class QNet {
       this.onNodeAdd["^"].bind(pre_node_element)()
       // for each field:
       this.cache[node_id] = {}
-      for(let fn in field_check) {
-        this.cache[node_id][fn] = field_check[fn]
+      let fields = this.cache[node_id]["fields"] = {}
+      for(let fid in field_check) {
+        fields[fid] = field_check[fid]
         // call add-node handler
-        let element = document.getElementById(field_check[fn])
+        let element = document.getElementById(field_check[fid])
         let node_element = new NodeElement(this, node_id, element)
-        this.onNodeAdd[fn].bind(node_element)()
+        this.onNodeAdd[fid].bind(node_element)()
       }
       if(this.mode == "switch") {
         // if new node IS NOT the only existing node:
         if(Object.keys(this.cache).length > 1) {
           // hide node visibility
-          for(let fid in this.cache[node_id]) {
-            let element = document.getElementById(this.cache[node_id][fid])
+          for(let fid in fields) {
+            let element = document.getElementById(fields[fid])
             element.style.display = "none"
           }
         } else {
@@ -175,8 +193,8 @@ class QNet {
       } else if(this.mode == "select") {
         // if new node IS the only existing node:
         if(Object.keys(this.cache).length == 1) {
-          for(let fid in this.cache) {
-            let element = document.getElementById(this.cache[node_id][fid])
+          for(let fid in fields) {
+            let element = document.getElementById(fields[fid])
             this.onNodeSelect.bind(element)()
           }
         }
@@ -192,9 +210,10 @@ class QNet {
       let pre_node_element = new NodeElement(this, node_id, null)
       this.onNodeDrop["^"].bind(pre_node_element)()
       // for each field:
-      for(let fid in this.cache[node_id]) {
+      let fields = this.cache[node_id]["fields"]
+      for(let fid in fields) {
         // call drop-node handler
-        let element = document.getElementById(this.cache[node_id][fid])
+        let element = document.getElementById(fields[fid])
         let node_element = new NodeElement(this, node_id, element)
         this.onNodeDrop["*"].bind(node_element)()
         this.onNodeDrop[fid].bind(node_element)()
@@ -217,25 +236,27 @@ class QNet {
           break
         }
         if(next_id != null) {
-          for(let fid in this.cache[next_id]) {
-            let element = document.getElementById(this.cache[next_id][fid])
+          for(let fid in this.cache[next_id]["fields"]) {
+            let element = document.getElementById(this.cache[next_id]["fields"][fid])
             element.style.display = null
           }
           this.active = next_id
         } else {
           this.active = null
         }
-      } else if(this.mode == "select" && this.active == "node_id") {
+      } else if(this.mode == "select" && this.active == node_id) {
         let next_id = null
         for(let key in this.cache) {
           next_id = key
           break
         }
         if(next_id != null) {
-          for(let fid in this.cache[next_id]) {
-            let element = document.getElementById(this.cache[next_id][fid])
-            this.onNodeSelect.bind(element)()
+          this.active = null
+          for(let fid in this.cache[next_id]["fields"]) {
+            this.selectNode(next_id)
           }
+        } else {
+          this.active = null
         }
       }
     }
@@ -243,12 +264,13 @@ class QNet {
   // toggle visibility for node
   toggleNodeVisible(node_id) {
     if(this.mode != "sync") {
-      console.log("Error: cannot toggle view using mode '"+this.mode+"'")
+      console.log("Error: cannot toggle view using mode '" + this.mode + "'")
     } else if(!(node_id in this.cache)) {
       console.log("Error: node '" + node_id + "' does not exist")
     } else {
-      for(let fid in this.cache[node_id]) {
-        let element = document.getElementById(this.cache[node_id][fid])
+      let fields = this.cache[node_id]["fields"]
+      for(let fid in fields) {
+        let element = document.getElementById(fields[fid])
         if(element.style.display == "none") {
           element.style.display = null
         } else {
@@ -262,7 +284,7 @@ class QNet {
     if(!(node_id in this.cache)) {
       console.log("Error: node '" + node_id + "' does not exist")
     } else {
-      let elid = this.cache[node_id][field_id]
+      let elid = this.cache[node_id]["fields"][field_id]
       return document.getElementById(elid)
     }
   }
@@ -274,58 +296,73 @@ class QNet {
       console.log("Error: node '" + node_id + "' does not exist")
     } else {
       // set current active node to invisible
-      for(let fid in this.cache[this.active]) {
-        let element = document.getElementById(this.cache[this.active][fid])
+      let fields = this.cache[this.active]["fields"]
+      for(let fid in fields) {
+        let element = document.getElementById(fields[fid])
         element.style.display = "none"
       }
       // set new active node to default visibility
-      for(let fid in this.cache[node_id]) {
-        let element = document.getElementById(this.cache[node_id][fid])
+      fields = this.cache[node_id]["fields"]
+      for(let fid in fields) {
+        let element = document.getElementById(fields[fid])
         element.style.display = null
       }
       // register new active element
       this.active = node_id
+      // check for bound switch, call switchClick handler
+      for(let eid in this.ctrl) {
+        if(this.ctrl[eid] == node_id) {
+          let element = document.getElementById(eid)
+          this.onSwitchClick.bind(element)()
+        }
+      }
     }
   }
   selectNode(node_id) {
     if(this.mode != "select") {
-      console.log("Error: cannot select active node using mode '"+this.mode+"'")
+      console.log("Error: cannot select active node using mode '" + this.mode + "'")
     } else if(!(node_id in this.cache)) {
       console.log("Error: node '" + node_id + "' does not exist")
     } else {
       // perform custom unselect function on currently active node
       if(this.active != null) {
-        for(let fid in this.cache[this.active]) {
-          let element = document.getElementById(this.cache[this.active][fid])
+        let fields = this.cache[this.active]["fields"]
+        for(let fid in fields) {
+          let element = document.getElementById(fields[fid])
           this.onNodeUnselect.bind(element)()
         }
       }
       // perform custom select function on newly active node
-      for(let fid in this.cache[this.active]) {
-        let element = document.getElementById(this.cache[this.active][fid])
+      let fields = this.cache[node_id]["fields"]
+      for(let fid in fields) {
+        let element = document.getElementById(fields[fid])
         this.onNodeSelect.bind(element)()
       }
       this.active = node_id
+      // check for bound select, call selectClick handler
+      for(let eid in this.ctrl) {
+        if(this.ctrl[eid] == node_id) {
+          let element = document.getElementById(eid)
+          this.onSelectClick.bind(element)()
+        }
+      }
     }
   }
   // handles bound actions
   handleEvent(evt) {
     let tid = evt.target.id
-    let element = document.getElementById(tid)
     let node_id = this.ctrl[tid]
 
     if(this.mode == "switch") {
       this.switchTo(node_id)
-      this.onSwitchClick.bind(element)()
     } else if(this.mode == "select") {
       this.selectNode(node_id)
-      this.onSelectClick.bind(element)()
     }
   }
   // bind switchTo(node_id) to element_id
   bindSwitch(element_id, node_id) {
     if(this.mode != "switch") { // check
-      console.log("Error: cannot use bound switch methods using mode '"+this.mode+"'")
+      console.log("Error: cannot use bound switch methods using mode '" + this.mode + "'")
     } else if(!(node_id in this.cache)) {
       console.log("Error: node '" + node_id + "' does not exist")
     } else if(element_id in this.ctrl) {
@@ -340,7 +377,7 @@ class QNet {
   // unbind switchTo from element_id
   unbindSwitch(element_id) {
     if(this.mode != "switch") { // check
-      console.log("Error: cannot use bound switch methods using mode '"+this.mode+"'")
+      console.log("Error: cannot use bound switch methods using mode '" + this.mode + "'")
     } else if(!(element_id in this.ctrl)) {
       console.log("Error: element with ID '"+element_id+"' is not bound")
     } else {
@@ -393,8 +430,8 @@ class QNet {
   // custom bound select listener
   onSelectClick() {}
   // custom node selected listener
-  onNodeSelect() {} // this = selected node elements
+  onNodeSelect() {} // this = selected node element
   // custom node unselected listener
-  onNodeUnselect() {} // this = unselected node elements
+  onNodeUnselect() {} // this = unselected node element
 
 }
